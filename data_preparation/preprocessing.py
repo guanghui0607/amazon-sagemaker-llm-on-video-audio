@@ -7,6 +7,7 @@ import torch
 import argparse
 import logging
 import os
+import json
 
 from split_paragraph import gen_parag
 
@@ -34,10 +35,19 @@ def extract_transcript(file_path, pipe, save_dir, chunk_length_s=20, sentence_em
         order=order
     )
     
-    for chunk, timestamp in zip(para_chunks, para_timestamp):
-        trans_path = f"{save_dir}/{file_name}_{timestamp[0]}_{timestamp[1]}.txt"
+    chunks_info = []
+    for idx, (chunk, timestamp) in enumerate(zip(para_chunks, para_timestamp)):
+        trans_path = f"{save_dir}/{idx}.txt"
         with open(trans_path, 'w', encoding='utf-8') as f:
             f.write(chunk)
+        
+        chunks_info.append({
+            "chunk": chunk,
+            "chunk_index": idx,
+            "start_timestamp": timestamp[0],
+            "end_timestamp": timestamp[1],
+        })
+    return chunks_info
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -45,6 +55,8 @@ if __name__ == "__main__":
     parser.add_argument("--clip-duration", type=int, default=120)
     parser.add_argument("--target-language", type=str, default="en")
     parser.add_argument("--sentence-embedding-model", type=str, default="all-mpnet-base-v2")
+    parser.add_argument("--clips_s3uri", type=str, required=True)
+    parser.add_argument("--transcripts_s3uri", type=str, required=True)
     parser.add_argument("--chunk-length", type=int, default=20)
     parser.add_argument("--p-size", type=int, default=10)
     parser.add_argument("--order", type=int, default=2)
@@ -65,6 +77,8 @@ if __name__ == "__main__":
     mp4_list = glob.glob(input_dir + "/*.mp4")
     mp3_list = glob.glob(input_dir + "/*.mp3")
     file_list = mp4_list + mp3_list
+    
+    file_chunking_list = []
     for file_path in file_list:
         print(file_path)
         if file_path.endswith('.mp4'):
@@ -80,7 +94,7 @@ if __name__ == "__main__":
         if not os.path.exists(trans_dir):
             os.makedirs(trans_dir)
         
-        extract_transcript(
+        chunks = extract_transcript(
             file_path,
             pipe,
             trans_dir,
@@ -90,3 +104,13 @@ if __name__ == "__main__":
             sentence_embedding_model=args.sentence_embedding_model,
             target_language=args.target_language
         )
+        
+        file_chunking_list.append({
+            "file_name": file_name,
+            "input_s3uri": args.clips_s3uri,
+            "output_s3uri": args.transcripts_s3uri,
+            "chunks": chunks
+        })
+        json_path = f"{transcript_dir}/metadata.json"
+        with open(json_path, 'w') as f:
+            json.dump(file_chunking_list, f, ensure_ascii=False, indent=4)
